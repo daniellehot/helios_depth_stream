@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/include/opencv4",
+                "${HOME}/ArenaSDK_Linux_x64/include/Arena",
+                "${HOME}/ArenaSDK_Linux_x64/GenICam/**",
+                "${HOME}/ArenaSDK_Linux_x64/include/Arena"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}

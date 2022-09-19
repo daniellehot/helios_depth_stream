@@ -1,4 +1,4 @@
-TARGET = opencv_test
+TARGET = main
 
 OPENCV_LIB_PATH = $(shell pkg-config --libs-only-L opencv4)
 OPENCV_INC_PATH = $(shell pkg-config --cflags-only-I opencv4)
