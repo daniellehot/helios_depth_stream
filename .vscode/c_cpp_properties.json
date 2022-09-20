@@ -5,9 +5,8 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "/usr/local/include/opencv4",
-                "${HOME}/ArenaSDK_Linux_x64/include/Arena",
-                "${HOME}/ArenaSDK_Linux_x64/GenICam/**",
-                "${HOME}/ArenaSDK_Linux_x64/include/Arena"
+                "${HOME}/ArenaSDK_Linux_x64/include/**",
+                "${HOME}/ArenaSDK_Linux_x64/GenICam/**"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
