@@ -13,17 +13,10 @@
 #define TAB1 "  "			
 #define TAB2 "    "
 #define TAB3 "      "
-
-// image timeout
 #define IMAGE_TIMEOUT 2000
+#define PLY_FILE_NAME "pc.ply"
+#define IMG_FILE_NAME "heatmap.jpg"
 
-struct PointData
-{
-	int16_t x;
-	int16_t y;
-	int16_t z;
-	int16_t intensity;
-};
 
 void signal_callback_handler(int signum)
 {
@@ -32,20 +25,21 @@ void signal_callback_handler(int signum)
    exit(signum);
 }
 
-void set_node_values(Arena::IDevice* pDevice)
-{
-	//GenApi::INodeMap* pNodeMap = pDevice->GetNodeMap();
-	//GenICam::gcstring operatingModeInitial = Arena::GetNodeValue<GenICam::gcstring>(pNodeMap, "Scan3dOperatingMode");
-    //std::cout<<"Operation mode "<<operatingModeInitial<<std::endl;
 
-	// change operating mode from Far Mode to Near Mode
-    Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance1500mm");
-	// enable stream auto negotiate packet size
-	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
-	// enable stream packet resend
-	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
-	
+Arena::IDevice* get_device(Arena::ISystem* pSystem)
+{
+	pSystem->UpdateDevices(100);
+	std::vector<Arena::DeviceInfo> deviceInfos = pSystem->GetDevices();
+	if (deviceInfos.size() == 0)
+	{
+		std::cout << "\nNo camera connected\nPress enter to complete\n";
+		std::getchar();
+		return 0;
+	}
+	Arena::IDevice* pDevice = pSystem->CreateDevice(deviceInfos[0]);
+	return pDevice;
 }
+
 
 void stream_data(Arena::IDevice* pDevice)
 {
@@ -203,12 +197,13 @@ Arena::IImage* apply_heatmap(Arena::IImage* pImage, float scale)
 	Arena::IImage* pHeatMapImage = Arena::ImageFactory::Create(pOutput, dstDataSize, width, height, BGR8);
 
 	Save::ImageParams jpgParams(width, height, dstBpp);
-	Save::ImageWriter jpgWriter(jpgParams, "heatmap.jpg");
+	Save::ImageWriter jpgWriter(jpgParams, IMG_FILE_NAME);
 	jpgWriter << pHeatMapImage->GetData();
 	std::cout << TAB2 << "Save heatmap image as jpg to " << jpgWriter.GetLastFileName() << "\n";
 	
 	return pHeatMapImage;
 }
+
 
 void show_heatmap_image(Arena::IDevice* pDevice)
 {
@@ -232,19 +227,63 @@ void show_heatmap_image(Arena::IDevice* pDevice)
 	pDevice->StopStream();
 }
 
-Arena::IDevice* get_device(Arena::ISystem* pSystem)
+
+void save_image_as_ply(Arena::IDevice* pDevice)
 {
-	pSystem->UpdateDevices(100);
-	std::vector<Arena::DeviceInfo> deviceInfos = pSystem->GetDevices();
-	if (deviceInfos.size() == 0)
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Coord3D_ABC16");
+	//other pixel format options for depth data are Coord3D_ABC16s, Coord3D_ABCY16, Coord3D_ABCY16s
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance1500mm");
+	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
+	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+	
+	pDevice->StartStream();
+	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
+
+	bool isSignedPixelFormat = false;
+
+	if ((pImage->GetPixelFormat() == Coord3D_ABC16s) || (pImage->GetPixelFormat() == Coord3D_ABCY16s))
 	{
-		std::cout << "\nNo camera connected\nPress enter to complete\n";
-		std::getchar();
-		return 0;
+		isSignedPixelFormat = true;
 	}
-	Arena::IDevice* pDevice = pSystem->CreateDevice(deviceInfos[0]);
-	return pDevice;
+
+	// Prepare image parameters
+	//    An image's width, height, and bits per pixel are required to save to
+	//    disk. Its size and stride (i.e. pitch) can be calculated from those 3
+	//    inputs. Notice that an image's size and stride use bytes as a unit
+	//    while the bits per pixel uses bits.
+
+	Save::ImageParams params(pImage->GetWidth(), pImage->GetHeight(), pImage->GetBitsPerPixel());
+
+	// Prepare image writer
+	//    The image writer requires 3 arguments to save an image: the image's
+	//    parameters, a specified file name or pattern, and the image data to
+	//    save. Providing these should result in a successfully saved file on the
+	//    disk. Because an image's parameters and file name pattern may repeat,
+	//    they can be passed into the image writer's constructor.
+	std::cout << TAB1 << "Prepare image writer\n";
+
+	Save::ImageWriter writer(params, PLY_FILE_NAME);
+
+	// set default parameters for SetPly()
+	bool filterPoints = true;
+	float scale = 0.25f;
+	float offsetA = 0.0f;
+	float offsetB = 0.0f;
+	float offsetC = 0.0f;
+
+	// set the output file format of the image writer to .ply
+	writer.SetPly(".ply", filterPoints, isSignedPixelFormat, scale, offsetA, offsetB, offsetC);
+
+	// Save image
+	//    Passing image data into the image writer using the cascading I/O
+	//    operator (<<) triggers a save. Notice that the << operator accepts the
+	//    image data as a constant unsigned 8-bit integer pointer (const
+	//    uint8_t*) and the file name as a character string (const char*).
+	std::cout << TAB1 << "Save ply data\n";
+
+	writer << pImage->GetData();
 }
+
 
 int main()
 {
@@ -261,14 +300,11 @@ int main()
 		Arena::ISystem* system = Arena::OpenSystem();
 		Arena::IDevice* camera = get_device(system);
 
-		// setup streaming parameters 
-		//set_node_values(camera);
-
 		// stream data
-        //stream_data(camera);
-		
 		//show_gray_image(camera);
-		show_heatmap_image(camera);
+		//show_heatmap_image(camera);
+		//save_image_as_ply(camera);
+		//stream_data(camera);
 
 		// clean up
 		system->DestroyDevice(camera);
