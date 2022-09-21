@@ -14,9 +14,18 @@
 #define NUM_IMAGES 25
 #define PLY_FILE_NAME "pc.ply"
 #define IMG_FILE_NAME "heatmap.jpg"
-#define OPERATING_MODE "Distance6000mm" //options are Distance1500mm, Distance6000mm
+#define OPERATING_MODE "Distance1500mm" //options are Distance1500mm, Distance6000mm
 //Distance1500mm@30FPS, Distance6000mm@15FPS
+
 int FLAG_KILL_STREAM = 0;
+
+struct PointData
+{
+	int16_t x;
+	int16_t y;
+	int16_t z;
+	int16_t intensity;
+};
 
 
 void signal_callback_handler(int signum)
@@ -103,12 +112,23 @@ Arena::IImage* apply_heatmap(Arena::IImage* pImage, float scale)
 
 	const double RGBmin = 0;
 	const double RGBmax = 255;
+	double redColorBorder, yellowColorBorder, greenColorBorder, cyanColorBorder, blueColorBorder;
 
-	double redColorBorder = 0;
-	double yellowColorBorder = 375;
-	double greenColorBorder = 750; 
-	double cyanColorBorder = 1125;
-	double blueColorBorder = 1500;
+	if (OPERATING_MODE == "Distance1500mm")
+	{
+		redColorBorder = 0;
+		yellowColorBorder = 375;
+		greenColorBorder = 750; 
+		cyanColorBorder = 1125;
+		blueColorBorder = 1500;
+	} else 
+	{
+		redColorBorder = 0;
+		yellowColorBorder = 1500;
+		greenColorBorder = 3000; 
+		cyanColorBorder = 4500;
+		blueColorBorder = 6000;
+	}
 	
 	// iterate through each pixel and assign a color to it according to a distance
 	for (size_t i = 0; i < size; i++)
@@ -216,7 +236,7 @@ void show_heatmap_image(Arena::IDevice* pDevice)
 	//sets all relevant nodes targeted towards getting smooth results
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp1000Us");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "Low");
-	Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	//Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
 	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
 	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
 
@@ -248,11 +268,17 @@ void save_image_as_ply(Arena::IDevice* pDevice)
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+
+	//setup nodes for smooth results
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp1000Us");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "Low");
+	Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
 	
 	//start stream and get an image
 	pDevice->StartStream();
 	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
-	std::cout<<"Depth data?\n"<<pImage->GetData()<<std::endl;
 
 	// Prepare image parameters
 	//    An image's width, height, and bits per pixel are required to save to
@@ -290,6 +316,7 @@ void save_image_as_ply(Arena::IDevice* pDevice)
 	//    image data as a constant unsigned 8-bit integer pointer (const
 	//    uint8_t*) and the file name as a character string (const char*).
 	writer << pImage->GetData();
+	pDevice->StopStream();
 }
 
 
@@ -339,6 +366,90 @@ void stream_data(Arena::IDevice* pDevice)
 	pDevice->StopStream();
 }
 
+
+void get_depth_map(Arena::IDevice* pDevice)
+{
+	std::string pixel_format = "Coord3D_ABCY16"; //other option is Coord3D_ABCY16s
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", pixel_format.c_str());
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance1500mm");
+	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
+	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateC");
+	double scaleZ = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateScale");
+
+	pDevice->StartStream();
+	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
+	// prepare info from input buffer
+	size_t width = pImage->GetWidth();
+	size_t height = pImage->GetHeight();
+	size_t size = width * height;
+	size_t srcBpp = pImage->GetBitsPerPixel();
+	size_t srcPixelSize = srcBpp / 8;
+	const uint8_t* pInput = pImage->GetData();
+	const uint8_t* pIn = pInput;
+
+	// using strcmp to avoid conversion issue
+	int compareResult_ABCY16s = strcmp(pixel_format.c_str(), "Coord3D_ABCY16s"); // if they are equal compareResult_ABCY16s = 0
+	int compareResult_ABCY16 = strcmp(pixel_format.c_str(), "Coord3D_ABCY16");	 // if they are equal compareResult_ABCY16 = 0
+
+	bool isSignedPixelFormat = false;
+
+	// if PIXEL_FORMAT is equal to Coord3D_ABCY16s
+	if (compareResult_ABCY16s == 0)
+	{
+		isSignedPixelFormat = true;
+
+		for (size_t i = 0; i < size; i++)
+		{
+			// Extract point data to signed 16 bit integer
+			//    The first channel is the x coordinate, second channel is the y
+			//    coordinate, the third channel is the z coordinate and the
+			//    fourth channel is intensity. We offset pIn by 2 for each
+			//    channel because pIn is an 8 bit integer and we want to read it
+			//    as a 16 bit integer.
+			//int16_t x = *reinterpret_cast<const int16_t*>(pIn);
+			//int16_t y = *reinterpret_cast<const int16_t*>((pIn + 2));
+			int16_t z = *reinterpret_cast<const int16_t*>((pIn + 4));
+			std::cout<<"pIn+4 "<< z <<std::endl;
+			//int16_t intensity = *reinterpret_cast<const int16_t*>((pIn + 6));
+
+			// convert x, y and z values to mm using their coordinate scales
+			//x = int16_t(double(x) * scaleX);
+			//y = int16_t(double(y) * scaleY);
+			z = int16_t(double(z) * scaleZ);
+			//std::cout<<"Z "<<z<<"\n";
+		}
+	// if PIXEL_FORMAT is equal to Coord3D_ABCY16
+	}
+	else if (compareResult_ABCY16 == 0)
+	{
+		for (size_t i = 0; i < size; i++)
+		{		
+			// Extract point data to signed 16 bit integer
+			//    The first channel is the x coordinate, second channel is the y
+			//    coordinate, the third channel is the z coordinate and the
+			//    fourth channel is intensity. We offset pIn by 2 for each
+			//    channel because pIn is an 8 bit integer and we want to read it
+			//    as a 16 bit integer.
+			uint16_t z = *reinterpret_cast<const uint16_t*>((pIn + 4));
+			std::cout<<"pIn "<<pIn<<std::endl;
+			std::cout<<"pIn+4 "<< z <<std::endl;
+			// if z is less than max value, as invalid values get filtered to
+			// 65535
+			if (z < 65535)
+			{
+				z = uint16_t(double(z) * scaleZ);
+				std::cout<<"Z "<<z<<"\n";
+			}
+
+			pIn += srcPixelSize;
+		}
+	}
+
+	pDevice->StopStream();
+}
+
+
 int main(int argc, char* argv[])
 {
 	// flag to track when an exception has been thrown
@@ -381,7 +492,7 @@ int main(int argc, char* argv[])
         // get a connected camera device
 		Arena::ISystem* system = Arena::OpenSystem();
 		Arena::IDevice* camera = get_device(system);
-
+		get_depth_map(camera);
 		if (std::string(argv[1]) == "-gray_img") show_gray_image(camera);
 		if (std::string(argv[1]) == "-heatmap_img") show_heatmap_image(camera);
 		if (std::string(argv[1]) == "-save_ply") save_image_as_ply(camera);
