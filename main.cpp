@@ -1,6 +1,3 @@
-//https://support.thinklucid.com/app-note-helios-3d-point-cloud-with-rgb-color/#gs-opencv2
-//https://support.thinklucid.com/using-opencv-with-arena-sdk-on-linux/
-//#include "stdafx.h"
 #include "ArenaApi.h"
 #include "SaveApi.h"
 
@@ -13,19 +10,20 @@
 
 #define TAB1 "  "			
 #define TAB2 "    "
-#define TAB3 "      "
 #define IMAGE_TIMEOUT 2000
 #define NUM_IMAGES 25
 #define PLY_FILE_NAME "pc.ply"
 #define IMG_FILE_NAME "heatmap.jpg"
-#define OPERATING_MODE "Distance1500mm" //options are Distance1500mm, Distance6000mm
+#define OPERATING_MODE "Distance6000mm" //options are Distance1500mm, Distance6000mm
+//Distance1500mm@30FPS, Distance6000mm@15FPS
+int FLAG_KILL_STREAM = 0;
 
 
 void signal_callback_handler(int signum)
 {
    std::cout << "Caught signal " << signum << std::endl;
    // Terminate program
-   exit(signum);
+   FLAG_KILL_STREAM = 1;
 }
 
 
@@ -51,6 +49,15 @@ void show_gray_image(Arena::IDevice* pDevice)
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+
+	//setup nodes for smooth results
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp1000Us");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "Low");
+	Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
+
+
 	//start stream and get an image
 	pDevice->StartStream();
 	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
@@ -187,10 +194,11 @@ Arena::IImage* apply_heatmap(Arena::IImage* pImage, float scale)
 	std::cout << TAB2 << "Create BGR heatmap using z data from 3D image\n";
 	Arena::IImage* pHeatMapImage = Arena::ImageFactory::Create(pOutput, dstDataSize, width, height, BGR8);
 
-	Save::ImageParams jpgParams(width, height, dstBpp);
-	Save::ImageWriter jpgWriter(jpgParams, IMG_FILE_NAME);
-	jpgWriter << pHeatMapImage->GetData();
-	std::cout << TAB2 << "Save heatmap image as jpg to " << jpgWriter.GetLastFileName() << "\n";
+	/* This code saves the heatmap as a jpg image */
+	//Save::ImageParams jpgParams(width, height, dstBpp);
+	//Save::ImageWriter jpgWriter(jpgParams, IMG_FILE_NAME);
+	//jpgWriter << pHeatMapImage->GetData();
+	//std::cout << TAB2 << "Save heatmap image as jpg to " << jpgWriter.GetLastFileName() << "\n";
 	
 	return pHeatMapImage;
 }
@@ -198,36 +206,34 @@ Arena::IImage* apply_heatmap(Arena::IImage* pImage, float scale)
 
 void show_heatmap_image(Arena::IDevice* pDevice)
 {
+	//set operating and streaming nodes
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Coord3D_ABCY16");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateC");
 
-	// set exposure time
-	//std::cout << TAB1 << "Set time selector to Exp1000Us\n";
+	//sets all relevant nodes targeted towards getting smooth results
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp1000Us");
-	// set gain
-	//std::cout << TAB1 << "Set conversion gain to low\n";
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "Low");
-	// Set image accumulation
-	//std::cout << TAB1 << "Set image accumulation to 4\n";
 	Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
-	// Enable spatial filter
-	//std::cout << TAB1 << "Enable spatial filter\n";
 	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
-	// Enable confidence threshold
-	//std::cout << TAB1 << "Enable confidence threshold\n";
 	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
 
+	//start stream and get an image
 	pDevice->StartStream();
 	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
+
+	//apply heatmap 
 	float scale = static_cast<float>(Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateScale"));
 	Arena::IImage* pHeatMapImage = apply_heatmap(pImage, scale);
+
+	//create opencv Mat from Arena::IImage and visualise it 
 	cv::Mat img = cv::Mat((int)pHeatMapImage->GetHeight(), (int)pHeatMapImage->GetWidth(), CV_8UC3, (void *)pHeatMapImage->GetData());
 	GenICam::gcstring windowName = Arena::GetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "DeviceModelName");
 	cv::imshow(windowName.c_str(), img);
     cv::waitKey(0);
+
 	//clean up
 	cv::destroyAllWindows();
     pDevice->RequeueBuffer(pImage);
@@ -236,29 +242,23 @@ void show_heatmap_image(Arena::IDevice* pDevice)
 
 
 void save_image_as_ply(Arena::IDevice* pDevice)
-{
+{	
+	//set operating and streaming nodes
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Coord3D_ABC16");
-	//other pixel format options for depth data are Coord3D_ABC16s, Coord3D_ABCY16, Coord3D_ABCY16s
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
 	
+	//start stream and get an image
 	pDevice->StartStream();
 	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
-
-	bool isSignedPixelFormat = false;
-
-	if ((pImage->GetPixelFormat() == Coord3D_ABC16s) || (pImage->GetPixelFormat() == Coord3D_ABCY16s))
-	{
-		isSignedPixelFormat = true;
-	}
+	std::cout<<"Depth data?\n"<<pImage->GetData()<<std::endl;
 
 	// Prepare image parameters
 	//    An image's width, height, and bits per pixel are required to save to
 	//    disk. Its size and stride (i.e. pitch) can be calculated from those 3
 	//    inputs. Notice that an image's size and stride use bytes as a unit
 	//    while the bits per pixel uses bits.
-
 	Save::ImageParams params(pImage->GetWidth(), pImage->GetHeight(), pImage->GetBitsPerPixel());
 
 	// Prepare image writer
@@ -267,12 +267,15 @@ void save_image_as_ply(Arena::IDevice* pDevice)
 	//    save. Providing these should result in a successfully saved file on the
 	//    disk. Because an image's parameters and file name pattern may repeat,
 	//    they can be passed into the image writer's constructor.
-	std::cout << TAB1 << "Prepare image writer\n";
-
 	Save::ImageWriter writer(params, PLY_FILE_NAME);
 
 	// set default parameters for SetPly()
 	bool filterPoints = true;
+	bool isSignedPixelFormat = false;
+	if ((pImage->GetPixelFormat() == Coord3D_ABC16s) || (pImage->GetPixelFormat() == Coord3D_ABCY16s))
+	{
+		isSignedPixelFormat = true;
+	}
 	float scale = 0.25f;
 	float offsetA = 0.0f;
 	float offsetB = 0.0f;
@@ -286,8 +289,6 @@ void save_image_as_ply(Arena::IDevice* pDevice)
 	//    operator (<<) triggers a save. Notice that the << operator accepts the
 	//    image data as a constant unsigned 8-bit integer pointer (const
 	//    uint8_t*) and the file name as a character string (const char*).
-	std::cout << TAB1 << "Save ply data\n";
-
 	writer << pImage->GetData();
 }
 
@@ -296,14 +297,20 @@ void stream_data(Arena::IDevice* pDevice)
 {
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Mono8");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "AcquisitionMode", "Continuous");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetTLStreamNodeMap(), "StreamBufferHandlingMode", "NewestOnly");
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+	
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp250Us");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "High");
+	//Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
 
 	GenICam::gcstring windowName = Arena::GetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "DeviceModelName");
 	pDevice->StartStream();
 
-	//for (int i = 0; i < NUM_IMAGES; i++)
 	while(1)
 	{
 		Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
@@ -313,7 +320,7 @@ void stream_data(Arena::IDevice* pDevice)
 		GenICam::gcstring pixelFormat = GetPixelFormatName(static_cast<PfncFormat>(pImage->GetPixelFormat()));
 		uint64_t timestampNs = pImage->GetTimestampNs();
 
-		std::cout << " (" << size << " bytes; " << width << "x" << height << "; " << pixelFormat << "; timestamp (ns): " << timestampNs << ")";
+		//std::cout << " (" << size << " bytes; " << width << "x" << height << "; " << pixelFormat << "; timestamp (ns): " << timestampNs << ")";
 		cv::Mat img = cv::Mat((int)pImage->GetHeight(), (int)pImage->GetWidth(), CV_8UC1, (void *)pImage->GetData());
 		cv::imshow(windowName.c_str(), img);
 		cv::waitKey(1);
@@ -322,25 +329,49 @@ void stream_data(Arena::IDevice* pDevice)
 		//    Notice that failing to requeue buffers may cause memory to leak and
 		//    may also result in the stream engine being starved due to there
 		//    being no available buffers.
-		std::cout << " and requeue\n";
-
 		pDevice->RequeueBuffer(pImage);
-
+		if (FLAG_KILL_STREAM) break;
 	}
 
 	// Stop stream
 	//    Stop the stream after all images have been requeued. Failing to stop
 	//    the stream will leak memory.
-	std::cout << TAB1 << "Stop stream\n";
-
 	pDevice->StopStream();
 }
 
-int main()
+int main(int argc, char* argv[])
 {
 	// flag to track when an exception has been thrown
 	bool exceptionThrown = false;
 	signal(SIGINT, signal_callback_handler);
+
+	if(argc>2){
+		std::cout<< "Please insert only one input argument. For help, run ./main -help \n";
+		exit(1);
+	} 
+
+	if(argc<2){
+		std::cout<< "Please insert an input argument. For help, run ./main -help \n";
+		exit(1); 
+	}
+
+	if (std::string(argv[1]) != "-help" && std::string(argv[1]) != "-gray_img" &&
+	std::string(argv[1]) != "-heatmap_img" && std::string(argv[1]) != "-save_ply" &&
+	std::string(argv[1]) != "-stream") {
+		std::cout<< "Unrecognized input argument. For help, run ./main -help \n";
+		exit(1);
+	}
+
+	
+	if (std::string(argv[1]) == "-help"){
+		std::cout<<"Input arguments are:\n"
+		<<TAB1<<"-gray_img"<<TAB1<<"Capture image, and visualise it as a grayscale image using OpenCV.\n"
+		<<TAB1<<"-heatmap_img"<<TAB1<<"Capture image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
+		<<TAB1<<"-save_ply"<<TAB1<<"Capture image, save it as a ply file.\n"
+		<<TAB1<<"-stream"<<TAB1<<"Stream data, visualise each image as a grayscale image using OpenCv\n";
+		exit(1);
+	}
+
 	
 	try
 	{
@@ -351,11 +382,10 @@ int main()
 		Arena::ISystem* system = Arena::OpenSystem();
 		Arena::IDevice* camera = get_device(system);
 
-		// stream data
-		//show_gray_image(camera);
-		show_heatmap_image(camera);
-		//save_image_as_ply(camera);
-		//stream_data(camera);
+		if (std::string(argv[1]) == "-gray_img") show_gray_image(camera);
+		if (std::string(argv[1]) == "-heatmap_img") show_heatmap_image(camera);
+		if (std::string(argv[1]) == "-save_ply") save_image_as_ply(camera);
+		if (std::string(argv[1]) == "-stream") stream_data(camera);
 
 		// clean up
 		system->DestroyDevice(camera);
