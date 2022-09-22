@@ -1,8 +1,12 @@
+//https://support.thinklucid.com/app-note-helios-3d-point-cloud-with-rgb-color/
+//https://gist.github.com/zhou-chao/7a7de79de47c652196f1
+
 #include "ArenaApi.h"
 #include "SaveApi.h"
 
 #include "signal.h"
 #include "unistd.h"
+#include <fstream>
 
 #include "opencv2/opencv.hpp"
 #include "opencv2/highgui.hpp"
@@ -14,18 +18,11 @@
 #define NUM_IMAGES 25
 #define PLY_FILE_NAME "pc.ply"
 #define IMG_FILE_NAME "heatmap.jpg"
+#define CSV_FILE_NAME "depth.csv"
 #define OPERATING_MODE "Distance1500mm" //options are Distance1500mm, Distance6000mm
 //Distance1500mm@30FPS, Distance6000mm@15FPS
 
 int FLAG_KILL_STREAM = 0;
-
-struct PointData
-{
-	int16_t x;
-	int16_t y;
-	int16_t z;
-	int16_t intensity;
-};
 
 
 void signal_callback_handler(int signum)
@@ -369,84 +366,74 @@ void stream_data(Arena::IDevice* pDevice)
 
 void get_depth_map(Arena::IDevice* pDevice)
 {
-	std::string pixel_format = "Coord3D_ABCY16"; //other option is Coord3D_ABCY16s
-	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", pixel_format.c_str());
+	// Get Helios XYZ data bytes and intensity data:
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Coord3D_ABCY16");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance1500mm");
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
+
+	//setup nodes for smooth results
+	//Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp250Us");
+	//Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "High");
+	//Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	//Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
+	//Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
+
+	// Read the scale factor and offsets to convert from unsigned 16-bit values 
+	// in the Coord3D_ABCY16 pixel format to coordinates in mm
+	double xyz_scale_mm = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateScale");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateA");
+	double x_offset_mm = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateOffset");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateB");
+	double y_offset_mm = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateOffset");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateC");
-	double scaleZ = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateScale");
+	double z_offset_mm = Arena::GetNodeValue<double>(pDevice->GetNodeMap(), "Scan3dCoordinateOffset");
 
 	pDevice->StartStream();
-	Arena::IImage* pImage = pDevice->GetImage(IMAGE_TIMEOUT);
-	// prepare info from input buffer
-	size_t width = pImage->GetWidth();
-	size_t height = pImage->GetHeight();
-	size_t size = width * height;
-	size_t srcBpp = pImage->GetBitsPerPixel();
-	size_t srcPixelSize = srcBpp / 8;
-	const uint8_t* pInput = pImage->GetData();
-	const uint8_t* pIn = pInput;
+	Arena::IImage* image = pDevice->GetImage(2000);
 
-	// using strcmp to avoid conversion issue
-	int compareResult_ABCY16s = strcmp(pixel_format.c_str(), "Coord3D_ABCY16s"); // if they are equal compareResult_ABCY16s = 0
-	int compareResult_ABCY16 = strcmp(pixel_format.c_str(), "Coord3D_ABCY16");	 // if they are equal compareResult_ABCY16 = 0
+	size_t height, width;
+	height = image->GetHeight();
+	width = image->GetWidth();
 
-	bool isSignedPixelFormat = false;
+	cv::Mat xyz_mm = cv::Mat((int)height, (int)width, CV_32FC3);
+	cv::Mat intensity_image = cv::Mat((int)height, (int)width, CV_16UC1);
 
-	// if PIXEL_FORMAT is equal to Coord3D_ABCY16s
-	if (compareResult_ABCY16s == 0)
+	const uint16_t* input_data;
+	input_data = (uint16_t*)image->GetData();
+
+	for (unsigned int ir = 0; ir < height; ++ir)
 	{
-		isSignedPixelFormat = true;
-
-		for (size_t i = 0; i < size; i++)
+		for (unsigned int ic = 0; ic < width; ++ic)
 		{
-			// Extract point data to signed 16 bit integer
-			//    The first channel is the x coordinate, second channel is the y
-			//    coordinate, the third channel is the z coordinate and the
-			//    fourth channel is intensity. We offset pIn by 2 for each
-			//    channel because pIn is an 8 bit integer and we want to read it
-			//    as a 16 bit integer.
-			//int16_t x = *reinterpret_cast<const int16_t*>(pIn);
-			//int16_t y = *reinterpret_cast<const int16_t*>((pIn + 2));
-			int16_t z = *reinterpret_cast<const int16_t*>((pIn + 4));
-			std::cout<<"pIn+4 "<< z <<std::endl;
-			//int16_t intensity = *reinterpret_cast<const int16_t*>((pIn + 6));
+			// Get unsigned 16 bit values for X,Y,Z coordinates
+			ushort x_u16 = input_data[0];
+			ushort y_u16 = input_data[1];
+			ushort z_u16 = input_data[2];
 
-			// convert x, y and z values to mm using their coordinate scales
-			//x = int16_t(double(x) * scaleX);
-			//y = int16_t(double(y) * scaleY);
-			z = int16_t(double(z) * scaleZ);
-			//std::cout<<"Z "<<z<<"\n";
-		}
-	// if PIXEL_FORMAT is equal to Coord3D_ABCY16
-	}
-	else if (compareResult_ABCY16 == 0)
-	{
-		for (size_t i = 0; i < size; i++)
-		{		
-			// Extract point data to signed 16 bit integer
-			//    The first channel is the x coordinate, second channel is the y
-			//    coordinate, the third channel is the z coordinate and the
-			//    fourth channel is intensity. We offset pIn by 2 for each
-			//    channel because pIn is an 8 bit integer and we want to read it
-			//    as a 16 bit integer.
-			uint16_t z = *reinterpret_cast<const uint16_t*>((pIn + 4));
-			std::cout<<"pIn "<<pIn<<std::endl;
-			std::cout<<"pIn+4 "<< z <<std::endl;
-			// if z is less than max value, as invalid values get filtered to
-			// 65535
-			if (z < 65535)
-			{
-				z = uint16_t(double(z) * scaleZ);
-				std::cout<<"Z "<<z<<"\n";
-			}
-
-			pIn += srcPixelSize;
+			// Convert 16-bit X,Y,Z to float values in mm
+			xyz_mm.at<cv::Vec3f>(ir, ic)[0] = (float)(x_u16 * xyz_scale_mm + x_offset_mm);
+			xyz_mm.at<cv::Vec3f>(ir, ic)[1] = (float)(y_u16 * xyz_scale_mm + y_offset_mm);
+			xyz_mm.at<cv::Vec3f>(ir, ic)[2] = (float)(z_u16 * xyz_scale_mm + z_offset_mm);
+			//std::cout<<"Pixel ("<<ir<<","<<ic<<") Distance "<<xyz_mm.at<cv::Vec3f>(ir, ic)[2]<<std::endl;
+			intensity_image.at<ushort>(ir, ic) = input_data[3]; // // Intensity value
+			input_data += 4;
 		}
 	}
-
+	std::cout<<"Distance at the center "<<xyz_mm.at<cv::Vec3f>(160, 320)[2]<<std::endl;
 	pDevice->StopStream();
+
+	cv::Mat channels[3];
+	cv::split(xyz_mm, channels);
+
+	std::ofstream myfile;
+	myfile.open(CSV_FILE_NAME);
+	myfile<< cv::format(channels[2], cv::Formatter::FMT_CSV) << std::endl;
+	myfile.close();
+
+	// Optional: Show the Helios intensity image
+	cv::imshow("HLS Intensity", intensity_image);
+	cv::waitKey(0);
 }
 
 
@@ -466,9 +453,9 @@ int main(int argc, char* argv[])
 		exit(1); 
 	}
 
-	if (std::string(argv[1]) != "-help" && std::string(argv[1]) != "-gray_img" &&
-	std::string(argv[1]) != "-heatmap_img" && std::string(argv[1]) != "-save_ply" &&
-	std::string(argv[1]) != "-stream") {
+	if (std::string(argv[1]) != "-help" && std::string(argv[1]) != "-gray" &&
+	std::string(argv[1]) != "-heatmap" && std::string(argv[1]) != "-ply" &&
+	std::string(argv[1]) != "-stream" && std::string(argv[1]) != "-depth" ) {
 		std::cout<< "Unrecognized input argument. For help, run ./main -help \n";
 		exit(1);
 	}
@@ -476,10 +463,11 @@ int main(int argc, char* argv[])
 	
 	if (std::string(argv[1]) == "-help"){
 		std::cout<<"Input arguments are:\n"
-		<<TAB1<<"-gray_img"<<TAB1<<"Capture image, and visualise it as a grayscale image using OpenCV.\n"
-		<<TAB1<<"-heatmap_img"<<TAB1<<"Capture image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
-		<<TAB1<<"-save_ply"<<TAB1<<"Capture image, save it as a ply file.\n"
-		<<TAB1<<"-stream"<<TAB1<<"Stream data, visualise each image as a grayscale image using OpenCv\n";
+		<<TAB1<<"-gray"<<TAB1<<"Capture image, and visualise it as a grayscale image using OpenCV.\n"
+		<<TAB1<<"-heatmap"<<TAB1<<"Capture image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
+		<<TAB1<<"-ply"<<TAB1<<"Capture image, save it as a ply file.\n"
+		<<TAB1<<"-stream"<<TAB1<<"Stream data, visualise each image as a grayscale image using OpenCV.\n"
+		<<TAB1<<"-depth"<<TAB1<<"Saves a depth map as a .csv file and shows an intensity image using OpenCV.\n";
 		exit(1);
 	}
 
@@ -492,12 +480,12 @@ int main(int argc, char* argv[])
         // get a connected camera device
 		Arena::ISystem* system = Arena::OpenSystem();
 		Arena::IDevice* camera = get_device(system);
-		get_depth_map(camera);
-		if (std::string(argv[1]) == "-gray_img") show_gray_image(camera);
-		if (std::string(argv[1]) == "-heatmap_img") show_heatmap_image(camera);
-		if (std::string(argv[1]) == "-save_ply") save_image_as_ply(camera);
+		
+		if (std::string(argv[1]) == "-gray") show_gray_image(camera);
+		if (std::string(argv[1]) == "-heatmap") show_heatmap_image(camera);
+		if (std::string(argv[1]) == "-ply") save_image_as_ply(camera);
 		if (std::string(argv[1]) == "-stream") stream_data(camera);
-
+		if (std::string(argv[1]) == "-depth") get_depth_map(camera);
 		// clean up
 		system->DestroyDevice(camera);
 		Arena::CloseSystem(system);
