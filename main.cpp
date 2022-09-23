@@ -225,7 +225,7 @@ void show_heatmap_image(Arena::IDevice* pDevice)
 {
 	//set operating and streaming nodes
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Coord3D_ABCY16");
-	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance6000mm");
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dCoordinateSelector", "CoordinateC");
@@ -321,7 +321,7 @@ void stream_data(Arena::IDevice* pDevice)
 {
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "PixelFormat", "Mono8");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "AcquisitionMode", "Continuous");
-	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", OPERATING_MODE);
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "Scan3dOperatingMode", "Distance6000mm");
 	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetTLStreamNodeMap(), "StreamBufferHandlingMode", "NewestOnly");
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamAutoNegotiatePacketSize", true);
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
@@ -373,11 +373,11 @@ void get_depth_map(Arena::IDevice* pDevice)
 	Arena::SetNodeValue<bool>(pDevice->GetTLStreamNodeMap(), "StreamPacketResendEnable", true);
 
 	//setup nodes for smooth results
-	//Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp250Us");
-	//Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "High");
-	//Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
-	//Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
-	//Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ExposureTimeSelector", "Exp250Us");
+	Arena::SetNodeValue<GenICam::gcstring>(pDevice->GetNodeMap(), "ConversionGain", "High");
+	Arena::SetNodeValue<int64_t>(pDevice->GetNodeMap(), "Scan3dImageAccumulation", 4);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dSpatialFilterEnable", true);
+	Arena::SetNodeValue<bool>(pDevice->GetNodeMap(), "Scan3dConfidenceThresholdEnable", true);
 
 	// Read the scale factor and offsets to convert from unsigned 16-bit values 
 	// in the Coord3D_ABCY16 pixel format to coordinates in mm
@@ -420,18 +420,29 @@ void get_depth_map(Arena::IDevice* pDevice)
 			input_data += 4;
 		}
 	}
-	std::cout<<"Distance at the center "<<xyz_mm.at<cv::Vec3f>(160, 320)[2]<<std::endl;
+	std::cout<<"X Distance at the center "<<xyz_mm.at<cv::Vec3f>(240, 320)[0]<<std::endl;
+	std::cout<<"Y Distance at the center "<<xyz_mm.at<cv::Vec3f>(240, 320)[1]<<std::endl;
+	std::cout<<"Z Distance at the center "<<xyz_mm.at<cv::Vec3f>(240, 320)[2]<<std::endl;
 	pDevice->StopStream();
 
 	cv::Mat channels[3];
 	cv::split(xyz_mm, channels);
 
 	std::ofstream myfile;
-	myfile.open(CSV_FILE_NAME);
-	myfile<< cv::format(channels[2], cv::Formatter::FMT_CSV) << std::endl;
-	myfile.close();
-
+	std::vector<std::string> filenames = {"x.csv", "y.csv", "z.csv"};
+	for (size_t i = 0; i < 3; i++)
+	{
+		myfile.open(filenames[i].c_str());
+		myfile<< cv::format(channels[i], cv::Formatter::FMT_CSV) << std::endl;
+		myfile.close();
+	}
+	
 	// Optional: Show the Helios intensity image
+	cv::Point center(320, 240);//Declaring the center point
+	int radius = 5; //Declaring the radius
+	cv::Scalar line_Color(0, 0, 0);//Color of the circle
+	int thickness = 5;//thickens of the line
+	cv::circle(intensity_image, center,radius, line_Color, thickness);//Using circle()function to draw the line//
 	cv::imshow("HLS Intensity", intensity_image);
 	cv::waitKey(0);
 }
@@ -463,11 +474,11 @@ int main(int argc, char* argv[])
 	
 	if (std::string(argv[1]) == "-help"){
 		std::cout<<"Input arguments are:\n"
-		<<TAB1<<"-gray"<<TAB1<<"Capture image, and visualise it as a grayscale image using OpenCV.\n"
-		<<TAB1<<"-heatmap"<<TAB1<<"Capture image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
-		<<TAB1<<"-ply"<<TAB1<<"Capture image, save it as a ply file.\n"
-		<<TAB1<<"-stream"<<TAB1<<"Stream data, visualise each image as a grayscale image using OpenCV.\n"
-		<<TAB1<<"-depth"<<TAB1<<"Saves a depth map as a .csv file and shows an intensity image using OpenCV.\n";
+		<<TAB1<<"-gray"<<TAB1<<"Capture an intensity image, and visualise it as a grayscale image using OpenCV.\n"
+		<<TAB1<<"-heatmap"<<TAB1<<"Capture depth data image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
+		<<TAB1<<"-ply"<<TAB1<<"Capture depth data, save it as a ply file.\n"
+		<<TAB1<<"-stream"<<TAB1<<"Stream intensity data.\n"
+		<<TAB1<<"-depth"<<TAB1<<"Capture depth data and save it into a .csv file.\n";
 		exit(1);
 	}
 
@@ -506,9 +517,6 @@ int main(int argc, char* argv[])
 		std::cout << "Unexpected exception thrown\n";
 		exceptionThrown = true;
 	}
-
-	//std::cout << "Press enter to complete\n";
-	//std::getchar();
 
 	if (exceptionThrown)
 		return -1;

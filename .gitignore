@@ -35,3 +35,5 @@
 *.jpg
 *.ply
 *.json
+*.csv
+*.py
