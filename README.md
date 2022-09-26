@@ -20,7 +20,9 @@ Follow the instructions at https://thinklucid.com/getting-started/#gs-Download-A
 1. Open Settings.
 2. Navigate to Network. 
 
-<img src="img/network_settings.png" alt="img" width="750"/>
+<p align="center">
+    <img src="img/network_settings.png" alt="img" width="500"/>
+</p>
 
 3. Add a new wired profile (click the + symbol)
 4. Set the profile settings as follows 
@@ -31,10 +33,12 @@ Follow the instructions at https://thinklucid.com/getting-started/#gs-Download-A
         - *Subnet* 255.255.0.0
     - You do not need to setup IPv6 or Security
 
-<img src="img/new_profile_1.png" alt="img"/>
-<img src="img/new_profile_2.png" alt="img"/>
+<p align="center">
+    <img src="img/new_profile_1.png" alt="img"/>
+    <img src="img/new_profile_2.png" alt="img"/>
+</p>
 
-5. You might need to turn the wired connection off and on again. 
+5. Select the new profile. You might need to turn the wired connection off and on again for change to take effect. 
 6. To confirm that the camera can be find on the network, run the following commands
 ```
 cd /PATH/TO/ARENA_SKD/precompiledExamples
