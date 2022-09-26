@@ -1,5 +1,5 @@
 # Arena SDK with OpenCV for C++ on Ubuntu 18.04
-This repo showcases functionality of a Lucid Helios (v1) time-of-fligh camera. The code was written and tested on Ubuntu 18.04 with OpenCV 4.6.
+This repo provides code for a Lucid Helios time-of-fligh camera. The code was written and tested on Ubuntu 18.04 with OpenCV 4.6 and Lucid Helios camera. The full specs of the used camera can be found at https://thinklucid.com/product/helios-time-of-flight-imx556/. 
 
 # Prerequisites
 
