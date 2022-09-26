@@ -1,4 +1,5 @@
 //https://support.thinklucid.com/app-note-helios-3d-point-cloud-with-rgb-color/
+//https://gist.github.com/zhou-chao/7a7de79de47c652196f1
 
 #include "ArenaApi.h"
 #include "SaveApi.h"
@@ -498,6 +499,7 @@ int main(int argc, char* argv[])
 		<<TAB1<<"-heatmap"<<TAB1<<"Capture depth data image, apply heatmat based on the measured depth, and visualise it as an rgb image using OpenCV.\n"
 		<<TAB1<<"-ply"<<TAB1<<"Capture depth data, save it as a ply file.\n"
 		<<TAB1<<"-stream"<<TAB1<<"Stream intensity data.\n"
+		<<TAB1<<"-depth"<<TAB1<<"Capture depth map and visualise the intensity data as a grayscale image.\n"
 		<<TAB1<<"Then select the operating mode. Input arguments are :\n"
 		<<TAB1<<"-6000"<<TAB1<<"Operating mode is set to Distance6000mm (Far Mode). This mode operates at 15 FPS.\n"
 		<<TAB1<<"-1500"<<TAB1<<"Operating mode is set to Distance1500mm (Near Mode). This mode operates at 30 FPS.\n"
