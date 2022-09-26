@@ -19,6 +19,9 @@ Follow the instructions at https://thinklucid.com/getting-started/#gs-Download-A
 ## Network setup
 1. Open Settings.
 2. Navigate to Network. 
+
+<img src="img/network_settings.png" alt="img" width="750"/>
+
 3. Add a new wired profile (click the + symbol)
 4. Set the profile settings as follows 
     - Choose arbitrary name
@@ -27,6 +30,10 @@ Follow the instructions at https://thinklucid.com/getting-started/#gs-Download-A
         - *IP* 169.254.0.1
         - *Subnet* 255.255.0.0
     - You do not need to setup IPv6 or Security
+
+<img src="img/new_profile_1.png" alt="img"/>
+<img src="img/new_profile_2.png" alt="img"/>
+
 5. You might need to turn the wired connection off and on again. 
 6. To confirm that the camera can be find on the network, run the following commands
 ```
@@ -34,7 +41,7 @@ cd /PATH/TO/ARENA_SKD/precompiledExamples
 ./IpConfigUtility /list
 ```
 If a camera is available on the networ, the output should list the camera and its settings - *MAC, IP, SUBNET, GATEWAY, IP_CONFIG*.
-
+![img](img/output.png)
 
 
 # How to compile and run this repo
