@@ -462,10 +462,6 @@ void get_depth_map(Arena::IDevice* pDevice)
 }
 
 
-void print(int i){
-	std::cout<<"Debug "<<i<<std::endl;
-}
-
 int main(int argc, char* argv[])
 {
 	// flag to track when an exception has been thrown
@@ -476,13 +472,11 @@ int main(int argc, char* argv[])
 		std::cout<< "Please insert only two input arguments. For help, run ./main -help \n";
 		exit(1);
 	} 
-	print(1);
 
 	if(argc<3 && std::string(argv[1]) != "-help"){
 		std::cout<< "Please insert two inputs argument. For help, run ./main -help \n";
 		exit(1); 
 	}
-	print(2);
 
 	if (std::string(argv[1]) != "-help" && std::string(argv[1]) != "-gray" &&
 	std::string(argv[1]) != "-heatmap" && std::string(argv[1]) != "-ply" &&
@@ -491,7 +485,6 @@ int main(int argc, char* argv[])
 		std::cout<< "Unrecognized input argument. For help, run ./main -help \n";
 		exit(1);
 	}
-	print(3);
 
 	if (std::string(argv[1]) == "-help"){
 		std::cout<<"First select functionality. Input arguments are:\n"
@@ -506,18 +499,15 @@ int main(int argc, char* argv[])
 		<<TAB1<<"For example, ./main -stream -6000 will launch stream in a Far Mode.\n";
 		exit(1);
 	}
-	print(4);
 	
 	if (std::string(argv[2]) != "-6000" && std::string(argv[2]) != "-1500")
 	{
 		std::cout<< "Unrecognized input argument. For help, run ./main -help \n";
 		exit(1);
 	}
-	print(5);
 
 	if (std::string(argv[2]) == "-6000") operating_mode = "Distance6000mm";
 	if (std::string(argv[2]) == "-1500") operating_mode = "Distance1500mm";
-	print(6);
 	
 	try
 	{
