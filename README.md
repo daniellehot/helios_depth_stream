@@ -28,6 +28,7 @@ Follow the instructions at https://thinklucid.com/getting-started/#gs-Download-A
 4. Set the profile settings as follows 
     - Choose arbitrary name
     - MAC address - if you have more options than one, pick the one assigned with the default profile
+    - Set MTU to 9000 bytes
     - IPv4
         - *IP* 169.254.0.1
         - *Subnet* 255.255.0.0
